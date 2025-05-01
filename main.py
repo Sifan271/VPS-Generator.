@@ -1,142 +1,125 @@
 import discord
 from discord.ext import commands, tasks
-import os
 import random
 import asyncio
+import time
 
-intents = discord.Intents.default()
-intents.messages = True
-intents.message_content = True
-intents.guilds = True
-intents.members = True
-
+intents = discord.Intents.all()
 bot = commands.Bot(command_prefix="!", intents=intents)
 
-user_balances = {}
-user_cooldowns = {}
+coins = {}
+last_work_time = {}
 vps_price = 500
 
 @bot.event
 async def on_ready():
-    print(f"Bot is ready as {bot.user}")
+    print(f"Logged in as {bot.user}")
+
+def get_coins(user_id):
+    return coins.get(user_id, 0)
+
+def add_coins(user_id, amount):
+    coins[user_id] = get_coins(user_id) + amount
 
 @bot.command()
 async def ping(ctx):
     await ctx.send(f"🏓 Pong! {round(bot.latency * 1000)}ms")
 
 @bot.command()
-async def cash(ctx):
-    coins = user_balances.get(ctx.author.id, 0)
-    await ctx.send(f"💰 You have {coins} coins.")
-
-@bot.command()
 async def work(ctx):
-    user_id = ctx.author.id
-    if user_id in user_cooldowns and asyncio.get_event_loop().time() - user_cooldowns[user_id] < 60:
-        await ctx.send("⏳ You need to wait 1 minute before working again.")
+    now = time.time()
+    uid = ctx.author.id
+    if uid in last_work_time and now - last_work_time[uid] < 60:
+        await ctx.send("🕒 Cooldown: Try again in 1 minute.")
         return
-    user_cooldowns[user_id] = asyncio.get_event_loop().time()
-    earnings = random.randint(10, 20)
-    user_balances[user_id] = user_balances.get(user_id, 0) + earnings
-    await ctx.send(f"👷 You worked hard and earned {earnings} coins!")
+    earned = random.randint(20, 50)
+    add_coins(uid, earned)
+    last_work_time[uid] = now
+    await ctx.send(f"💼 You worked hard and earned {earned} coins!")
 
 @bot.command()
 async def crime(ctx):
-    user_id = ctx.author.id
-    outcome = random.choices(["win", "lose"], weights=[45, 55])[0]
-    if outcome == "win":
-        earnings = random.randint(50, 150)
-        user_balances[user_id] = user_balances.get(user_id, 0) + earnings
-        await ctx.send(f"🕵️ You succeeded in a crime and stole {earnings} coins!")
+    uid = ctx.author.id
+    if random.random() < 0.45:
+        earned = random.randint(50, 100)
+        add_coins(uid, earned)
+        await ctx.send(f"💰 Successful crime! You gained {earned} coins.")
     else:
-        loss = random.randint(30, 100)
-        user_balances[user_id] = max(user_balances.get(user_id, 0) - loss, 0)
-        await ctx.send(f"🚨 You got caught and lost {loss} coins!")
+        lost = min(get_coins(uid), random.randint(30, 70))
+        coins[uid] -= lost
+        await ctx.send(f"🚓 You got caught and lost {lost} coins.")
 
 @bot.command()
 async def shop(ctx):
-    await ctx.send(f"🛒 VPS Shop:\n- VPS: {vps_price} coins\nUse `!shop_buy_vps` to purchase.")
+    await ctx.send(f"🛒 VPS - {vps_price} coins\nUse `!buy-vps` to purchase.")
 
-@bot.command(name="shop_buy_vps")
-async def shop_buy_vps(ctx):
-    user_id = ctx.author.id
-    if user_balances.get(user_id, 0) >= vps_price:
-        user_balances[user_id] -= vps_price
-        await ctx.send("✅ You bought a VPS!")
+@bot.command()
+async def buy_vps(ctx):
+    uid = ctx.author.id
+    if get_coins(uid) >= vps_price:
+        coins[uid] -= vps_price
+        await ctx.send("✅ VPS purchased!")
     else:
-        await ctx.send("❌ Not enough coins!")
+        await ctx.send("❌ Not enough coins.")
 
 @bot.command()
 async def coinflip(ctx, bet: int):
-    user_id = ctx.author.id
-    if user_balances.get(user_id, 0) < bet:
-        await ctx.send("❌ Not enough coins to bet.")
-        return
-    result = random.choice(["heads", "tails"])
-    if result == "heads":
-        user_balances[user_id] += bet
-        await ctx.send(f"🎉 You won! (+{bet})")
+    uid = ctx.author.id
+    if get_coins(uid) < bet:
+        return await ctx.send("❌ Not enough coins.")
+    if random.choice([True, False]):
+        add_coins(uid, bet)
+        await ctx.send(f"🪙 You won {bet} coins!")
     else:
-        user_balances[user_id] -= bet
-        await ctx.send(f"😢 You lost! (-{bet})")
-
-@bot.command()
-async def spins(ctx, bet: int):
-    user_id = ctx.author.id
-    if user_balances.get(user_id, 0) < bet:
-        await ctx.send("❌ Not enough coins to spin.")
-        return
-    prize = random.choices([0, bet * 2], weights=[60, 40])[0]
-    user_balances[user_id] = user_balances.get(user_id, 0) - bet + prize
-    if prize > 0:
-        await ctx.send(f"🎰 Lucky spin! You won {prize} coins!")
-    else:
-        await ctx.send("🎰 Unlucky spin. You got nothing.")
+        coins[uid] -= bet
+        await ctx.send(f"😢 You lost {bet} coins.")
 
 @bot.command()
 async def hunt(ctx, bet: int):
-    user_id = ctx.author.id
-    if user_balances.get(user_id, 0) < bet:
-        await ctx.send("❌ Not enough coins to hunt.")
-        return
-    prize = random.choices([0, bet * 3], weights=[70, 30])[0]
-    user_balances[user_id] = user_balances.get(user_id, 0) - bet + prize
-    if prize > 0:
-        await ctx.send(f"🏹 You hunted a big animal and earned {prize} coins!")
+    uid = ctx.author.id
+    if get_coins(uid) < bet:
+        return await ctx.send("❌ Not enough coins.")
+    if random.random() < 0.5:
+        reward = bet * 2
+        add_coins(uid, reward)
+        await ctx.send(f"🏹 You hunted and earned {reward} coins!")
     else:
-        await ctx.send("🏹 Hunt failed. No coins for you.")
+        coins[uid] -= bet
+        await ctx.send(f"🌲 You found nothing and lost {bet} coins.")
 
 @bot.command()
-@commands.has_permissions(kick_members=True)
+async def spin(ctx, bet: int):
+    uid = ctx.author.id
+    if get_coins(uid) < bet:
+        return await ctx.send("❌ Not enough coins.")
+    outcome = random.choice(["win", "lose"])
+    if outcome == "win":
+        reward = int(bet * 1.5)
+        add_coins(uid, reward)
+        await ctx.send(f"🎰 Spin win! You gained {reward} coins.")
+    else:
+        coins[uid] -= bet
+        await ctx.send(f"🎰 Spin lose! You lost {bet} coins.")
+
+@bot.command()
+async def giveaway(ctx, amount: int):
+    if get_coins(ctx.author.id) < amount:
+        return await ctx.send("❌ Not enough coins for giveaway.")
+    coins[ctx.author.id] -= amount
+    await ctx.send(f"🎉 Giveaway started for {amount} coins! React with 🎉 to join.")
+
+@bot.command()
 async def kick(ctx, member: discord.Member, *, reason=None):
     await member.kick(reason=reason)
     await ctx.send(f"👢 Kicked {member.mention}")
 
 @bot.command()
-@commands.has_permissions(ban_members=True)
 async def ban(ctx, member: discord.Member, *, reason=None):
     await member.ban(reason=reason)
     await ctx.send(f"🔨 Banned {member.mention}")
 
 @bot.command()
-async def giveaway(ctx, amount: int):
-    await ctx.send(f"🎁 A giveaway has started! React with 🎉 to enter. Prize: {amount} coins!")
-    msg = await ctx.send("🎉 React here to join the giveaway!")
-    await msg.add_reaction("🎉")
+async def cash(ctx):
+    await ctx.send(f"💰 You have {get_coins(ctx.author.id)} coins.")
 
-    await asyncio.sleep(10)  # 10 seconds for testing
-    msg = await ctx.channel.fetch_message(msg.id)
-    users = await msg.reactions[0].users().flatten()
-    users = [user for user in users if not user.bot]
-
-    if users:
-        winner = random.choice(users)
-        user_balances[winner.id] = user_balances.get(winner.id, 0) + amount
-        await ctx.send(f"🎉 Congratulations {winner.mention}, you won {amount} coins!")
-    else:
-        await ctx.send("😢 No one entered the giveaway.")
-
-import os
-from dotenv import load_dotenv
-load_dotenv()
-bot.run(os.getenv("DISCORD_BOT_TOKEN"))
+bot.run("YOUR_TOKEN_HERE")
